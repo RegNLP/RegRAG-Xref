@@ -570,3 +570,326 @@ python srs/judge_qas_ensemble.py \
 -   Human spot-checks on borderline fused cases (`final_score` ∈ {6,7} or `dual_use`==3).
     
 -   Public leaderboard split with hidden evidence for benchmarking dual-passage RAG.
+
+## 11) Dataset Evaluation (IR-based Retrieval Analysis on Full Corpus)
+
+This section documents how we evaluate RegRAG-Xref using **retrieval over the full 40-document corpus**, and defines the 5 IR systems used later for concordance / agreement analysis.
+
+### 11.1 Full-Corpus Passage Collection
+
+We work over all passages extracted from the 40 ADGM/FSRA documents listed in `srs/doc_manifest.py`. Each source JSON contains items like:
+
+`{  "ID":  "e563ad09-df80-435c-a497-eeec420efbc4",  "DocumentID":  1,  "PassageID":  "1.1",  "Passage":  "Jurisdiction", ... }` 
+
+We map:
+
+-   `ID` → `pid`
+    
+-   `Passage` → `text`
+    
+-   (optional) `DocumentID` → `document_id`
+    
+-   (optional) `PassageID` → `passage_id`
+    
+
+Full passage corpus:
+
+```
+python srs/build_full_passages.py \
+  --out_passages data/passages_full.jsonl \
+  --out_json_collection passages_json/collection_full.jsonl
+  ```
+
+Each line in `data/passages_full.jsonl` is a JSON object:
+
+`{"pid":  "...",  "text":  "...",  "document_id":  3,  "passage_id":  "1.1"}` 
+
+This yields:
+
+-   ~**13,015** passages across the 40 documents
+    
+-   `passages_json/collection_full.jsonl` for BM25 (Pyserini JsonCollection)
+    
+
+### 11.2 Queries and Qrels (from Curated QAs)
+
+Queries and relevance labels come from the **curated QA sets** (after LLM-as-a-judge filtering):
+
+-   Inputs (curated QAs):
+    
+    -   `outputs/judging/curated/DPEL/kept.jsonl`
+        
+    -   `outputs/judging/curated/DPEL/eliminated.jsonl`
+        
+    -   `outputs/judging/curated/SCHEMA/kept.jsonl`
+        
+    -   `outputs/judging/curated/SCHEMA/eliminated.jsonl`
+        
+
+Construction of global queries/qrels (kept + eliminated):
+
+``` 
+mkdir -p data/ir inputs/ir runs_full/kept runs_full/eliminated indexes passages_json outputs/judging/analysis 
+```
+
+```
+python srs/build_ir_inputs.py \
+  --inputs \
+    outputs/judging/curated/DPEL/kept.jsonl \
+    outputs/judging/curated/DPEL/eliminated.jsonl \
+    outputs/judging/curated/SCHEMA/kept.jsonl \
+    outputs/judging/curated/SCHEMA/eliminated.jsonl 
+```
+
+This script:
+
+-   Writes query files:
+    
+    -   `inputs/ir/queries_kept.tsv`
+        
+    -   `inputs/ir/queries_eliminated.tsv`
+        
+-   Writes global qrels:
+    
+    -   `inputs/ir/qrels_kept.txt`
+        
+    -   `inputs/ir/qrels_eliminated.txt`
+        
+
+Each query (`qa_id`) has **two relevant passages** in the qrels:
+
+-   `source_passage_id`
+    
+-   `target_passage_id`
+    
+
+For method-level slicing (DPEL vs SCHEMA, kept vs eliminated), we use:
+
+```python srs/build_method_qrels.py \
+  --dpel-kept outputs/judging/curated/DPEL/kept.jsonl \
+  --dpel-elim outputs/judging/curated/DPEL/eliminated.jsonl \
+  --schema-kept outputs/judging/curated/SCHEMA/kept.jsonl \
+  --schema-elim outputs/judging/curated/SCHEMA/eliminated.jsonl
+  ```
+
+which produces:
+
+-   `inputs/ir/qrels_kept_dpel.txt`
+    
+-   `inputs/ir/qrels_eliminated_dpel.txt`
+    
+-   `inputs/ir/qrels_kept_schema.txt`
+    
+-   `inputs/ir/qrels_eliminated_schema.txt`
+    
+
+### 11.3 IR Systems (5-Method Suite)
+
+We evaluate five retrieval systems over the **full corpus**:
+
+1.  **BM25 (lexical baseline)**
+    
+2.  **Dense e5** (`intfloat/e5-base-v2`)
+    
+3.  **Dense BGE** (`BAAI/bge-base-en-v1.5`)
+    
+4.  **BM25 → e5 rerank** (two-stage: BM25 candidates, e5 scoring)
+    
+5.  **Hybrid RRF (BM25 + e5)** (Reciprocal Rank Fusion)
+    
+
+> We also experimented with BM25+RM3 and BM25+Rocchio, but they consistently underperformed plain BM25 and are therefore not included in the final suite.
+
+#### 11.3.1 BM25 (full corpus)
+
+Index over the full passage collection:
+
+```python -m pyserini.index.lucene \
+  --collection JsonCollection \
+  --input passages_json \
+  --index indexes/bm25_full \
+  --generator DefaultLuceneDocumentGenerator \
+  --threads 4 \
+  --storePositions --storeDocvectors --storeRaw
+  ```
+
+Run BM25 for kept / eliminated queries:
+
+``` 
+python -m pyserini.search.lucene \
+  --index indexes/bm25_full \
+  --topics inputs/ir/queries_kept.tsv \
+  --bm25 --k1 0.9 --b 0.4 \
+  --hits 100 \
+  --batch-size 64 --threads 4 \
+  --output runs_full/kept/bm25.txt # ELIMINATED python -m pyserini.search.lucene \
+  --index indexes/bm25_full \
+  --topics inputs/ir/queries_eliminated.tsv \
+  --bm25 --k1 0.9 --b 0.4 \
+  --hits 100 \
+  --batch-size 64 --threads 4 \
+  --output runs_full/eliminated/bm25.txt
+  ```
+
+#### 11.3.2 Dense e5 (full corpus)
+
+We use `srs/run_dense_e5_sbert.py` (SentenceTransformers-based) to encode `data/passages_full.jsonl` and retrieve using inner product (normalized embeddings).
+
+``` 
+python srs/run_dense_e5_sbert.py \
+  --passages data/passages_full.jsonl \
+  --model-name intfloat/e5-base-v2 \
+  --queries inputs/ir/queries_kept.tsv \
+  --output runs_full/kept/e5.txt \
+  --k 100 # ELIMINATED python srs/run_dense_e5_sbert.py \
+  --passages data/passages_full.jsonl \
+  --model-name intfloat/e5-base-v2 \
+  --queries inputs/ir/queries_eliminated.tsv \
+  --output runs_full/eliminated/e5.txt \
+  --k 100
+  ``` 
+
+#### 11.3.3 Dense BGE (full corpus)
+
+Same pipeline, different model name:
+
+```
+python srs/run_dense_e5_sbert.py \
+  --passages data/passages_full.jsonl \
+  --model-name BAAI/bge-base-en-v1.5 \
+  --queries inputs/ir/queries_kept.tsv \
+  --output runs_full/kept/bge.txt \
+  --k 100 # ELIMINATED python srs/run_dense_e5_sbert.py \
+  --passages data/passages_full.jsonl \
+  --model-name BAAI/bge-base-en-v1.5 \
+  --queries inputs/ir/queries_eliminated.tsv \
+  --output runs_full/eliminated/bge.txt \
+  --k 100 
+  ```
+
+#### 11.3.4 BM25 → e5 rerank
+
+Two-stage retriever:
+
+1.  Use BM25 to get top-**K** candidates per query (e.g., 200).
+    
+2.  Re-score only those candidates with e5, then re-rank.
+    
+
+Script: `srs/rerank_bm25_with_e5.py`.
+
+```
+python srs/rerank_bm25_with_e5.py \
+  --passages data/passages_full.jsonl \
+  --queries inputs/ir/queries_kept.tsv \
+  --bm25 runs_full/kept/bm25.txt \
+  --output runs_full/kept/bm25_e5_rerank.txt \
+  --model-name intfloat/e5-base-v2 \
+  --k-candidate 200 \
+  --k-output 100 # ELIMINATED python srs/rerank_bm25_with_e5.py \
+  --passages data/passages_full.jsonl \
+  --queries inputs/ir/queries_eliminated.tsv \
+  --bm25 runs_full/eliminated/bm25.txt \
+  --output runs_full/eliminated/bm25_e5_rerank.txt \
+  --model-name intfloat/e5-base-v2 \
+  --k-candidate 200 \
+  --k-output 100
+  ```
+
+#### 11.3.5 Hybrid RRF (BM25 + e5)
+
+We fuse scores from BM25 and dense e5 using Reciprocal Rank Fusion (RRF). Script: `srs/fuse_rrf.py`.
+
+```
+python srs/fuse_rrf.py \
+  --bm25 runs_full/kept/bm25.txt \
+  --dense runs_full/kept/e5.txt \
+  --output runs_full/kept/hybrid_rrf_bm25_e5.txt \
+  --k 100 --rrf-k 60 # ELIMINATED python srs/fuse_rrf.py \
+  --bm25 runs_full/eliminated/bm25.txt \
+  --dense runs_full/eliminated/e5.txt \
+  --output runs_full/eliminated/hybrid_rrf_bm25_e5.txt \
+  --k 100 --rrf-k 60
+  ```
+
+### 11.4 Evaluation Protocol (Full Corpus)
+
+We evaluate all five methods on the full corpus using:
+
+-   **Per-method slices:**
+    
+    -   DPEL-kept: `inputs/ir/qrels_kept_dpel.txt`
+        
+    -   DPEL-eliminated: `inputs/ir/qrels_eliminated_dpel.txt`
+        
+    -   SCHEMA-kept: `inputs/ir/qrels_kept_schema.txt`
+        
+    -   SCHEMA-eliminated: `inputs/ir/qrels_eliminated_schema.txt`
+        
+-   **Metrics:**
+    
+    -   Recall@10 (R@10)
+        
+    -   MAP@10
+        
+    -   nDCG@10
+        
+
+The evaluation script `srs/eval_ir.py` computes all three metrics with de-duplicated docids per query. Example commands:
+
+```
+python srs/eval_ir.py \
+  --qrels inputs/ir/qrels_kept_dpel.txt \
+  --runs \
+    runs_full/kept/bm25.txt \
+    runs_full/kept/bge.txt \
+    runs_full/kept/e5.txt \
+    runs_full/kept/bm25_e5_rerank.txt \
+    runs_full/kept/hybrid_rrf_bm25_e5.txt \
+  --k 10 # DPEL – eliminated (full corpus) python srs/eval_ir.py \
+  --qrels inputs/ir/qrels_eliminated_dpel.txt \
+  --runs \
+    runs_full/eliminated/bm25.txt \
+    runs_full/eliminated/bge.txt \
+    runs_full/eliminated/e5.txt \
+    runs_full/eliminated/bm25_e5_rerank.txt \
+    runs_full/eliminated/hybrid_rrf_bm25_e5.txt \
+  --k 10 # SCHEMA – kept (full corpus) python srs/eval_ir.py \
+  --qrels inputs/ir/qrels_kept_schema.txt \
+  --runs \
+    runs_full/kept/bm25.txt \
+    runs_full/kept/bge.txt \
+    runs_full/kept/e5.txt \
+    runs_full/kept/bm25_e5_rerank.txt \
+    runs_full/kept/hybrid_rrf_bm25_e5.txt \
+  --k 10 # SCHEMA – eliminated (full corpus) python srs/eval_ir.py \
+  --qrels inputs/ir/qrels_eliminated_schema.txt \
+  --runs \
+    runs_full/eliminated/bm25.txt \
+    runs_full/eliminated/bge.txt \
+    runs_full/eliminated/e5.txt \
+    runs_full/eliminated/bm25_e5_rerank.txt \
+    runs_full/eliminated/hybrid_rrf_bm25_e5.txt \
+  --k 10
+  ```
+
+### 11.5 High-Level Findings (Full Corpus Only)
+
+On the full 40-document corpus:
+
+-   **BM25** is a strong lexical baseline but consistently outperformed by dense and hybrid methods.
+    
+-   **Dense e5** and **Dense BGE** both significantly improve over BM25 across all slices; their performance is close, with small variations (BGE sometimes slightly ahead, sometimes slightly behind).
+    
+-   **BM25 → e5 rerank** improves over pure BM25 but typically remains below the best dense and hybrid fusion.
+    
+-   **Hybrid RRF (BM25 + e5)** is the **strongest system** across all slices (DPEL/SCHEMA × kept/eliminated), achieving the highest R@10 / MAP@10 / nDCG@10.
+    
+-   DPEL-eliminated subsets are noticeably harder than DPEL-kept (lower recall), while SCHEMA-eliminated is closer to SCHEMA-kept, suggesting that elimination criteria are not purely retrieval-based.
+    
+
+These results confirm that:
+
+-   The curated dataset is **retrieval-friendly but non-trivial** when evaluated over the full corpus.
+    
+-   The 5-system IR suite (BM25, e5, BGE, BM25→e5 rerank, Hybrid RRF) provides a rich basis for downstream **concordance and agreement analyses** over RegRAG-Xref.
