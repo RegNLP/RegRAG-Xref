@@ -12,7 +12,9 @@ The project has three main pillars:
 3.  **Evaluation** – intrinsic analysis of the dataset + extrinsic evaluation via retrieval and RAG.
     
 
-_Last updated: 4 Nov 2025 (Asia/Dubai)_
+_Last updated: 6 Nov 2025 (Asia/Dubai)_
+
+----------
 
 ## 1. Corpus & Cross-Reference Ground Truth
 
@@ -37,6 +39,8 @@ _Last updated: 4 Nov 2025 (Asia/Dubai)_
     
 
 This CSV is the canonical ground truth for **paired evidence** (SOURCE ↔ TARGET).
+
+----------
 
 ## 2. QA Generation (Two Methods, Two Personas)
 
@@ -65,33 +69,36 @@ Two personas are used for questions; answers are always professional.
 -   Output must be **valid JSON** (no markdown).
     
 
+----------
+
 ### 2.2 Method A — DPEL (Direct Passage Evidence Linking)
 
 -   **Input:** `data/CrossReferenceData.csv`
     
 -   **Goal:** generate QAs directly from cross-reference pairs.
     
--   **Filters:**
+
+**Filters:**
+
+-   Skip empty/degenerate pairs (`source_id == target_id`, identical texts, empty passages).
     
-    -   Skip empty/degenerate pairs (`source_id == target_id`, identical texts, empty passages).
-        
-    -   Optional sampling (`--row_sample_n`, `--max_pairs`).
-        
-    -   Optional `--drop_title_targets`.
-        
--   **Answer requirements:**
+-   Optional sampling (`--row_sample_n`, `--max_pairs`).
     
-    -   Professional paragraph (~180–230 words, min 160).
-        
-    -   Must contain `[#SRC:…]` and `[#TGT:…]`.
-        
--   **Citation policy:** questions may include citations.
+-   Optional `--drop_title_targets`.
     
+
+**Answer requirements:**
+
+-   Professional paragraph (~180–230 words, min 160).
+    
+-   Must contain `[#SRC:…]` and `[#TGT:…]`.
+    
+
+**Citation policy:** questions may include citations.
 
 **Command (example):**
 
-```
-python srs/generate_qas_method_DPEL.py \
+`python srs/generate_qas_method_DPEL.py \
   --input_csv data/CrossReferenceData.csv \
   --output_jsonl outputs/generation/dpel/all/answers.jsonl \
   --report_json outputs/generation/dpel/all/report.json \
@@ -101,24 +108,21 @@ python srs/generate_qas_method_DPEL.py \
   --temperature 0.2 \
   --seed 13 \
   --dedup \
-  --verbose
+  --verbose` 
 
-```
+----------
 
 ### 2.3 Method B — SCHEMA (Schema-Anchored Generation)
 
 Two steps: schema extraction, then QA generation from schema.
 
-**Step 1: Schema Extraction**
+#### Step 1: Schema Extraction
 
-```
-python srs/extract_schemas.py \
+`python srs/extract_schemas.py \
   --input_csv data/CrossReferenceData.csv \
   --output_jsonl outputs/extracted_schema.jsonl \
   --model gpt-4o \
-  --drop_title_targets
-
-```
+  --drop_title_targets` 
 
 Each item includes:
 
@@ -142,10 +146,9 @@ Heuristics:
 -   Light deduplication.
     
 
-**Step 2: QA Generation From Schema**
+#### Step 2: QA Generation From Schema
 
-```
-python srs/generate_qas_method_schema.py \
+`python srs/generate_qas_method_schema.py \
   --input_jsonl outputs/extracted_schema.jsonl \
   --output_jsonl outputs/generation/schema/all/answers.jsonl \
   --report_json outputs/generation/schema/all/report.json \
@@ -156,9 +159,7 @@ python srs/generate_qas_method_schema.py \
   --seed 13 \
   --dual_anchors_mode freeform_only \
   --dedup \
-  --verbose
-
-```
+  --verbose` 
 
 Key points:
 
@@ -168,6 +169,8 @@ Key points:
     
 -   Optional `--no_citations` to forbid citations in questions for SCHEMA.
     
+
+----------
 
 ## 3. Curation via LLM-as-a-Judge (Ensemble)
 
@@ -184,7 +187,7 @@ Local script gates:
 
 LLM gate:
 
--   Dual-evidence: the question must truly require both passages.
+-   Dual-evidence: the question must truly require **both** passages.
     
 
 ### 3.2 Scoring Rubric
@@ -218,8 +221,7 @@ Pass conditions:
 
 **Command:**
 
-```
-python srs/judge_qas_ensemble.py \
+`python srs/judge_qas_ensemble.py \
   --inputs outputs/generation/dpel/all/answers.jsonl \
            outputs/generation/schema/all/answers_nociteQ.jsonl \
   --out_jsonl outputs/judging/ensemble/judgments.jsonl \
@@ -232,9 +234,7 @@ python srs/judge_qas_ensemble.py \
   --allow_citations_in_answer \
   --temperature 0.0 \
   --seed 13 \
-  --verbose
-
-```
+  --verbose` 
 
 Curated sets are then split into:
 
@@ -242,6 +242,8 @@ Curated sets are then split into:
     
 -   `outputs/judging/curated/SCHEMA/{kept,eliminated}.jsonl`
     
+
+----------
 
 ## 4. Full-Corpus IR & Concordance
 
@@ -256,33 +258,24 @@ Source documents and paths are configured in:
 
 Full corpus builder:
 
-```
-python srs/build_full_passages.py \
+`python srs/build_full_passages.py \
   --out_passages data/passages_full.jsonl \
-  --out_json_collection passages_json/collection_full.jsonl
-
-```
+  --out_json_collection passages_json/collection_full.jsonl` 
 
 Each line:
 
-```
-{"pid": "...", "text": "...", "document_id": 3, "passage_id": "1.1"}
-
-```
+`{"pid":  "...",  "text":  "...",  "document_id":  3,  "passage_id":  "1.1"}` 
 
 ### 4.2 Queries & Qrels from Curated QAs
 
 From curated QAs, we build query sets and qrels:
 
-```
-python srs/build_ir_inputs.py \
+`python srs/build_ir_inputs.py \
   --inputs \
     outputs/judging/curated/DPEL/kept.jsonl \
     outputs/judging/curated/DPEL/eliminated.jsonl \
     outputs/judging/curated/SCHEMA/kept.jsonl \
-    outputs/judging/curated/SCHEMA/eliminated.jsonl
-
-```
+    outputs/judging/curated/SCHEMA/eliminated.jsonl` 
 
 Produces:
 
@@ -293,14 +286,11 @@ Produces:
 
 For method-specific slicing:
 
-```
-python srs/build_method_qrels.py \
+`python srs/build_method_qrels.py \
   --dpel-kept outputs/judging/curated/DPEL/kept.jsonl \
   --dpel-elim outputs/judging/curated/DPEL/eliminated.jsonl \
   --schema-kept outputs/judging/curated/SCHEMA/kept.jsonl \
-  --schema-elim outputs/judging/curated/SCHEMA/eliminated.jsonl
-
-```
+  --schema-elim outputs/judging/curated/SCHEMA/eliminated.jsonl` 
 
 Produces:
 
@@ -328,8 +318,7 @@ All evaluated on `data/passages_full.jsonl`:
 
 Example BM25 index & run:
 
-```
-python -m pyserini.index.lucene \
+`python -m pyserini.index.lucene \
   --collection JsonCollection \
   --input passages_json \
   --index indexes/bm25_full \
@@ -343,42 +332,34 @@ python -m pyserini.search.lucene \
   --bm25 --k1 0.9 --b 0.4 \
   --hits 100 \
   --batch-size 64 --threads 4 \
-  --output runs_full/kept/bm25.txt
-
-```
+  --output runs_full/kept/bm25.txt` 
 
 Dense e5 example:
 
-```
-python srs/run_dense_e5_sbert.py \
+`python srs/run_dense_e5_sbert.py \
   --passages data/passages_full.jsonl \
   --model-name intfloat/e5-base-v2 \
   --queries inputs/ir/queries_kept.tsv \
   --output runs_full/kept/e5.txt \
-  --k 100
-
-```
+  --k 100` 
 
 Hybrid RRF example:
 
-```
-python srs/fuse_rrf.py \
+`python srs/fuse_rrf.py \
   --bm25 runs_full/kept/bm25.txt \
   --dense runs_full/kept/e5.txt \
   --output runs_full/kept/hybrid_rrf_bm25_e5.txt \
-  --k 100 --rrf-k 60
-
-```
+  --k 100 --rrf-k 60` 
 
 ### 4.4 IR Evaluation & Concordance
 
 We compute metrics:
 
--   Recall@10 (R@10)
+-   **Recall@10** (R@10)
     
--   MAP@10
+-   **MAP@10**
     
--   nDCG@10
+-   **nDCG@10**
     
 
 ...using `srs/eval_ir.py` for each slice:
@@ -390,8 +371,7 @@ We compute metrics:
 
 Example:
 
-```
-python srs/eval_ir.py \
+`python srs/eval_ir.py \
   --qrels inputs/ir/qrels_kept_dpel.txt \
   --runs \
     runs_full/kept/bm25.txt \
@@ -399,14 +379,11 @@ python srs/eval_ir.py \
     runs_full/kept/e5.txt \
     runs_full/kept/bm25_e5_rerank.txt \
     runs_full/kept/hybrid_rrf_bm25_e5.txt \
-  --k 10
-
-```
+  --k 10` 
 
 To approximate human agreement, we compute per-query concordance across the 5 IR methods:
 
-```
-python srs/concordance_ir.py \
+`python srs/concordance_ir.py \
   --qrels inputs/ir/qrels_kept_dpel.txt \
   --runs \
     runs_full/kept/bm25.txt \
@@ -416,13 +393,11 @@ python srs/concordance_ir.py \
     runs_full/kept/hybrid_rrf_bm25_e5.txt \
   --k 10 \
   --out-jsonl outputs/judging/analysis/concordance_kept_dpel.jsonl \
-  --out-csv   outputs/judging/analysis/concordance_kept_dpel.csv
-
-```
+  --out-csv   outputs/judging/analysis/concordance_kept_dpel.csv` 
 
 `concordance_ir.py` records, for each query:
 
--   for each method:
+-   **per method:**
     
     -   whether _any_ relevant passage appears in top-k (`hit_any`),
         
@@ -430,18 +405,22 @@ python srs/concordance_ir.py \
         
     -   rank of the first relevant hit,
         
--   global counts:
+-   **global counts:**
     
     -   `num_methods_hit_any`, `num_methods_hit_all`,
         
     -   simple labels: `high_concordance_any` (≥4/5 methods hit) and `low_concordance_any` (≤1/5).
         
 
+----------
+
 ## 5. RAG Experiments & RAG Concordance
 
-We also run 5× RAG setups mirroring the IR suite and evaluate answer quality using lexical, LLM-based, and NLI-based metrics. The goal is to see if the curated QAs (especially the `kept` sets) lead to stronger, more consistent RAG performance across retrievers.
+We also run 5× RAG setups mirroring the IR suite and evaluate answer quality using lexical, LLM-based, and NLI-based metrics.
 
-### 5.1 RAG Runner (run_rag.py)
+Goal: check whether curated QAs (especially the `kept` sets) lead to stronger, more consistent RAG performance across retrievers.
+
+### 5.1 RAG Runner (`run_rag.py`)
 
 RAG is run over the full passage corpus with two modes:
 
@@ -456,10 +435,8 @@ Inputs:
     
     -   `outputs/judging/curated/{DPEL,SCHEMA}/{kept,eliminated}.jsonl`
         
--   Full passages:
+-   Full passages: `data/passages_full.jsonl`
     
-    -   `data/passages_full.jsonl`
-        
 -   Runfiles (for `realistic` mode):
     
     -   `runs_full/{kept,eliminated}/{bm25,bge,e5,bm25_e5_rerank,hybrid_rrf_bm25_e5}.txt`
@@ -467,8 +444,7 @@ Inputs:
 
 Example (realistic, BM25, DPEL-kept):
 
-```
-python srs/run_rag.py \
+`python srs/run_rag.py \
   --mode realistic \
   --qa-jsonl outputs/judging/curated/DPEL/kept.jsonl \
   --passages data/passages_full.jsonl \
@@ -476,22 +452,17 @@ python srs/run_rag.py \
   --topk 4 \
   --out-jsonl outputs/rag/dpel_kept_bm25_k4_gpt4o_full.jsonl \
   --model gpt-4o \
-  --seed 13
-
-```
+  --seed 13` 
 
 Example (oracle, DPEL-kept):
 
-```
-python srs/run_rag.py \
+`python srs/run_rag.py \
   --mode oracle \
   --qa-jsonl outputs/judging/curated/DPEL/kept.jsonl \
   --passages data/passages_full.jsonl \
   --out-jsonl outputs/rag/dpel_kept_oracle_gpt4o_full.jsonl \
   --model gpt-4o \
-  --seed 13
-
-```
+  --seed 13` 
 
 Each RAG output line includes:
 
@@ -508,7 +479,7 @@ Each RAG output line includes:
 -   `debug_context` (with gold `source_passage_id` / `target_passage_id`)
     
 
-### 5.2 RAG Evaluation (eval_rag.py)
+### 5.2 RAG Evaluation (`eval_rag.py`)
 
 We evaluate each RAG run on three dimensions:
 
@@ -524,7 +495,7 @@ We evaluate each RAG run on three dimensions:
         
     -   `answer_faithfulness` (0–5): semantic agreement with the gold `expected_answer`
         
-    -   Implemented via one call per QA to a small GPT model (e.g. `gpt-4o-mini`) using `expected_answer` and `rag_answer` only (no passages) in a strict JSON format.
+    -   Implemented via one call per QA to a small GPT model (e.g. `gpt-4o-mini`) using `expected_answer` and `rag_answer` only (no passages), strict JSON output.
         
 3.  **Faithfulness / groundedness via NLI (optional, local HF model)**
     
@@ -536,75 +507,51 @@ We evaluate each RAG run on three dimensions:
         
     -   Aggregate per QA:
         
-        -   `mean entailment probability`
+        -   mean entailment probability
             
-        -   `mean contradiction probability`
+        -   mean contradiction probability
             
 
 Command (example):
 
-```
-python srs/eval_rag.py \
+`python srs/eval_rag.py \
   --inputs outputs/rag/dpel_kept_oracle_gpt4o_full.jsonl \
   --out-dir outputs/rag_eval \
   --use-llm-judge \
   --judge-model gpt-4o-mini \
   --use-nli \
-  --nli-model cross-encoder/nli-deberta-v3-small
+  --nli-model cross-encoder/nli-deberta-v3-small` 
 
-```
+Full sweep:
 
-For a full sweep over all RAG runs:
-
-```
-python srs/eval_rag.py \
+`python srs/eval_rag.py \
   --inputs outputs/rag/*.jsonl \
   --out-dir outputs/rag_eval \
   --use-llm-judge \
   --judge-model gpt-4o-mini \
   --use-nli \
-  --nli-model cross-encoder/nli-deberta-v3-small
-
-```
+  --nli-model cross-encoder/nli-deberta-v3-small` 
 
 Outputs:
 
--   Per-run summary metrics:
+-   **Per-run summary metrics:**
     
     -   `outputs/rag_eval/<run_basename>_metrics.json`
         
     -   (aggregate F1, ROUGE-L, GPT means, NLI means)
         
--   Per-QA detailed metrics (with caching for re-runs):
+-   **Per-QA detailed metrics (with caching):**
     
     -   `outputs/rag_eval/<run_basename>_per_qa.jsonl`
         
 
-Example per-QA fields:
+Example per-QA entry:
 
-```
-{
-  "qa_id": "...",
-  "question": "...",
-  "gold_answer": "...",
-  "rag_answer": "...",
-  "f1": 0.61,
-  "rouge_l_f1": 0.47,
-  "judge_model": "gpt-4o-mini",
-  "gpt_answer_relevance": 5,
-  "gpt_answer_faithfulness": 4,
-  "nli_model": "cross-encoder/nli-deberta-v3-small",
-  "nli_entailment": 0.606,
-  "nli_contradiction": 0.0004
-}
+`{  "qa_id":  "...",  "question":  "...",  "gold_answer":  "...",  "rag_answer":  "...",  "f1":  0.61,  "rouge_l_f1":  0.47,  "judge_model":  "gpt-4o-mini",  "gpt_answer_relevance":  5,  "gpt_answer_faithfulness":  4,  "nli_model":  "cross-encoder/nli-deberta-v3-small",  "nli_entailment":  0.606,  "nli_contradiction":  0.0004  }` 
 
-```
+### 5.3 RAG Concordance (`concordance_rag.py`)
 
-Caching logic ensures that if a per-qa file already exists, the script reuses previous GPT and NLI scores instead of paying for them again.
-
-### 5.3 RAG Concordance (concordance_rag.py)
-
-We aggregate the per-QA RAG metrics by:
+We aggregate per-QA RAG metrics by:
 
 -   `method` ∈ {DPEL, SCHEMA}
     
@@ -617,7 +564,7 @@ We aggregate the per-QA RAG metrics by:
 -   `model` (currently `gpt4o` for generation)
     
 
-We define a simple success condition per QA (tunable thresholds):
+Success condition per QA (tunable):
 
 -   F1 ≥ `f1_thresh` (default 0.5),
     
@@ -628,59 +575,256 @@ We define a simple success condition per QA (tunable thresholds):
 -   NLI `contradiction` ≤ `nli_contra_thresh` (default 0.2).
     
 
-`success_rate` = fraction of QAs in a group satisfying all of the above.
+`success_rate` = fraction of QAs satisfying all of the above.
 
-Command (example):
+Command:
 
-```
-python srs/concordance_rag.py \
+`python srs/concordance_rag.py \
   --inputs outputs/rag_eval/*_per_qa.jsonl \
   --out-json outputs/rag_eval/concordance_rag_summary.json \
   --f1-thresh 0.5 \
   --faith-thresh 4.0 \
   --nli-ent-thresh 0.4 \
   --nli-contra-thresh 0.2 \
-  --exclude-oracle
+  --exclude-oracle` 
 
-```
+**High-level patterns:**
 
-This prints a compact table and writes the same content to JSON, e.g.:
-
--   averages for each group:
+-   For both DPEL and SCHEMA, the `kept` subsets **consistently outperform** the `eliminated` subsets across:
     
-    -   `F1`, `ROUGE-L`, `GPT_rel`, `GPT_faith`, `NLI_ent`, `NLI_contra`
-        
--   `success_rate` under the thresholds above.
-    
-
-Key empirical patterns (high level):
-
--   For both DPEL and SCHEMA, the `kept` subsets consistently outperform the `eliminated` subsets across:
-    
-    -   F1 / ROUGE-L (lexical completeness),
+    -   F1 / ROUGE-L,
         
     -   GPT answer relevance & faithfulness,
         
-    -   NLI entailment and overall `success_rate`.
+    -   NLI entailment and `success_rate`.
         
--   The **Hybrid RRF (BM25 + e5)** retriever tends to give the best or near-best RAG metrics in all slices.
+-   **Hybrid RRF (BM25 + e5)** generally yields the best or near-best RAG metrics in all slices.
     
 
-These patterns support that:
+This supports that:
 
-1.  the LLM-as-a-judge curation is aligned with downstream RAG performance, and
+1.  The LLM-as-a-judge curation is aligned with downstream RAG performance.
     
-2.  `kept` ≈ higher-quality supervision for RAG, compared to `eliminated`.
+2.  `kept` ≈ higher-quality supervision for RAG than `eliminated`.
     
 
-## 6. Folder Layout (Canonical)
+----------
 
-```
-RegRAG-Xref/
+## 6. Final Datasets (IR & QA)
+
+We define two final dataset families per method:
+
+-   **IR dataset** – for retrieval-only evaluation (queries + relevant passages).
+    
+-   **QA / RAG dataset** – for full question–answer supervision and RAG evaluation.
+    
+
+Built by:
+
+`python srs/build_final_dataset.py \
+  --dpel-kept outputs/judging/curated/DPEL/kept.jsonl \
+  --schema-kept outputs/judging/curated/SCHEMA/kept.jsonl \
+  --ir-dpel-kept outputs/judging/analysis/concordance_kept_dpel.jsonl \
+  --ir-schema-kept outputs/judging/analysis/concordance_kept_schema.jsonl \
+  --rag-perqa-glob "outputs/rag_eval/*_per_qa.jsonl" \
+  --out-dir outputs/final \
+  --ir-min-methods-hit-any 4 \
+  --rag-f1-thresh 0.45 \
+  --rag-faith-thresh 3.5 \
+  --rag-nli-ent-thresh 0.35 \
+  --rag-nli-contra-thresh 0.2 \
+  --train-ratio 0.8 --dev-ratio 0.1 --test-ratio 0.1 \
+  --split-seed 13` 
+
+### 6.1 Final Sizes (after all filters)
+
+-   **DPEL**
+    
+    -   Generated: 1774
+        
+    -   Kept (post-judge): 1659
+        
+    -   Eliminated: 115
+        
+    -   IR-good (IR concordance, ≥4/5 methods hit-any): 1586
+        
+    -   QA-gold (IR-good + RAG-good): **401**
+        
+    
+    Final files:
+    
+    -   IR dataset: `outputs/final/DPEL/RegRAG-Xref_DPEL_ir.jsonl`
+        
+        -   splits: train=1269, dev=159, test=158
+            
+    -   QA/RAG dataset: `outputs/final/DPEL/RegRAG-Xref_DPEL_QA.jsonl`
+        
+        -   splits: train=321, dev=40, test=40
+            
+-   **SCHEMA**
+    
+    -   Generated: 1661
+        
+    -   Kept (post-judge): 961
+        
+    -   Eliminated: 700
+        
+    -   IR-good: 918
+        
+    -   QA-gold: **207**
+        
+    
+    Final files:
+    
+    -   IR dataset: `outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_ir.jsonl`
+        
+        -   splits: train=734, dev=92, test=92
+            
+    -   QA/RAG dataset: `outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_QA.jsonl`
+        
+        -   splits: train=166, dev=21, test=20
+            
+
+These **final splits** are what you’d use for training and evaluating retrieval/RAG models in downstream experiments.
+
+----------
+
+## 7. Dataset Evaluation (Intrinsic & Extrinsic)
+
+### 7.1 Intrinsic Evaluation (`analyze_intrinsic.py` / `eval_dataset_intrinsic.py`)
+
+We compute intrinsic statistics over the generation → curation → IR-good → QA-gold pipeline, grouped by:
+
+-   `method` ∈ {DPEL, SCHEMA}
+    
+-   `persona` (basic / professional)
+    
+-   `item_type` (from schema, when available)
+    
+-   `reference_type` (internal / external / not defined, when available)
+    
+
+Command:
+
+`python srs/analyze_intrinsic.py \
+  --out-dir-analysis outputs/analysis_intrinsic` 
+
+Outputs:
+
+-   `outputs/analysis_intrinsic/{DPEL,SCHEMA}_persona.csv`
+    
+-   `outputs/analysis_intrinsic/{DPEL,SCHEMA}_item_type.csv`
+    
+-   `outputs/analysis_intrinsic/{DPEL,SCHEMA}_reference_type.csv`
+    
+-   plus length/cross-document CSVs if enabled.
+    
+
+Example (persona-level, DPEL):
+
+-   basic: 888 generated → 833 kept → 774 IR-good → 114 QA-gold
+    
+-   professional: 886 generated → 826 kept → 812 IR-good → 287 QA-gold
+    
+
+We also compute a compact JSON summary with RAG overlay on QA-gold:
+
+`python srs/eval_dataset_intrinsic.py \
+  --final-dpel-ir outputs/final/DPEL/RegRAG-Xref_DPEL_ir.jsonl \
+  --final-schema-ir outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_ir.jsonl \
+  --final-dpel-qa outputs/final/DPEL/RegRAG-Xref_DPEL_QA.jsonl \
+  --final-schema-qa outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_QA.jsonl \
+  --rag-perqa-glob "outputs/rag_eval/*_per_qa.jsonl" \
+  --out-json outputs/analysis_dataset/intrinsic_summary.json` 
+
+This includes, for QA-gold:
+
+-   mean F1 / ROUGE-L,
+    
+-   mean GPT `answer_relevance` / `answer_faithfulness`,
+    
+-   mean NLI entailment / contradiction.
+    
+
+### 7.2 Extrinsic Evaluation (`eval_dataset_extrinsic.py`)
+
+We assess **downstream performance** of the final datasets using both IR and RAG metrics, broken out by:
+
+-   method: DPEL vs SCHEMA
+    
+-   dataset type: **QA dataset** vs **IR dataset**
+    
+-   split: train / dev / test
+    
+-   retriever: BM25, E5, BGE, BM25→E5 rerank, Hybrid RRF
+    
+
+Command:
+
+`python srs/eval_dataset_extrinsic.py \
+  --final-dpel-ir outputs/final/DPEL/RegRAG-Xref_DPEL_ir.jsonl \
+  --final-schema-ir outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_ir.jsonl \
+  --final-dpel-qa outputs/final/DPEL/RegRAG-Xref_DPEL_QA.jsonl \
+  --final-schema-qa outputs/final/SCHEMA/RegRAG-Xref_SCHEMA_QA.jsonl \
+  --qrels-dpel inputs/ir/qrels_kept_dpel.txt \
+  --qrels-schema inputs/ir/qrels_kept_schema.txt \
+  --runs-bm25 runs_full/kept/bm25.txt \
+  --runs-e5 runs_full/kept/e5.txt \
+  --runs-bge runs_full/kept/bge.txt \
+  --runs-rerank runs_full/kept/bm25_e5_rerank.txt \
+  --runs-hybrid runs_full/kept/hybrid_rrf_bm25_e5.txt \
+  --rag-perqa-glob "outputs/rag_eval/*_per_qa.jsonl" \
+  --out-json outputs/analysis_dataset/extrinsic_summary.json` 
+
+For each combination (method, retriever, split) the script prints tables like:
+
+**QA Dataset**
+
+-   `n_qas`
+    
+-   IR metrics: Recall@10, MAP@10, nDCG@10 (restricted to that QA subset)
+    
+-   RAG metrics: F1, ROUGE-L, GPT_rel, GPT_faith, NLI_ent, NLI_contra
+    
+
+**IR Dataset**
+
+-   `n_qas`
+    
+-   IR metrics only: Recall@10, MAP@10, nDCG@10
+    
+
+**Key observations:**
+
+-   **Hybrid RRF** is consistently the strongest retriever across all splits and both methods, for both IR and RAG metrics.
+    
+-   Within each method, as you move BM25 → dense → rerank → Hybrid:
+    
+    -   IR metrics improve,
+        
+    -   and RAG metrics (F1, ROUGE-L, GPT faithfulness, NLI entailment) also improve in a smooth way.
+        
+-   QA-gold subsets have **better IR metrics** than the broader IR-good datasets, which is expected because QA-gold is a stricter “easy/high-quality” slice.
+    
+-   Train/dev/test splits are well balanced (metrics are very similar across splits), so there’s no obvious split bias or leakage.
+    
+
+This gives a clean **extrinsic validation** that:
+
+-   the dataset is learnable and coherent, and
+    
+-   the curation signals (judge + IR + RAG) correlate with real downstream performance.
+    
+
+----------
+
+## 8. Folder Layout (Canonical)
+
+`RegRAG-Xref/
 ├─ data/
 │  ├─ CrossReferenceData.csv
 │  ├─ passages_full.jsonl
-│  └─ Documents/                # 40 source JSON docs
+│  └─ Documents/                    # 40 source JSON docs
 ├─ passages_json/
 │  ├─ collection_full.jsonl
 │  └─ ...
@@ -711,11 +855,31 @@ RegRAG-Xref/
 │  │  │  └─ SCHEMA/{kept,eliminated}.jsonl
 │  │  └─ analysis/
 │  │     └─ concordance_*.{jsonl,csv}
-│  └─ rag/
-│     └─ *.jsonl                # all RAG runs from run_rag.py
-├─ outputs/rag_eval/
-│  ├─ *_metrics.json            # per-run summary metrics
-│  └─ *_per_qa.jsonl            # per-QA metrics with GPT/NLI scores
+│  ├─ rag/
+│  │  └─ *.jsonl                    # all RAG runs from run_rag.py
+│  ├─ rag_eval/
+│  │  ├─ *_metrics.json             # per-run RAG summary metrics
+│  │  └─ *_per_qa.jsonl             # per-QA metrics with GPT/NLI scores
+│  ├─ gold/
+│  │  ├─ DPEL/gold.jsonl            # legacy gold-only split (IR+RAG)
+│  │  ├─ SCHEMA/gold.jsonl
+│  │  └─ summary.json
+│  ├─ final/
+│  │  ├─ DPEL/RegRAG-Xref_DPEL_ir.jsonl
+│  │  ├─ DPEL/RegRAG-Xref_DPEL_QA.jsonl
+│  │  ├─ SCHEMA/RegRAG-Xref_SCHEMA_ir.jsonl
+│  │  ├─ SCHEMA/RegRAG-Xref_SCHEMA_QA.jsonl
+│  │  └─ summary.json
+│  └─ analysis_intrinsic/
+│     ├─ DPEL_persona.csv
+│     ├─ DPEL_item_type.csv
+│     ├─ DPEL_reference_type.csv
+│     ├─ SCHEMA_persona.csv
+│     ├─ SCHEMA_item_type.csv
+│     └─ SCHEMA_reference_type.csv
+├─ outputs/analysis_dataset/
+│  ├─ intrinsic_summary.json
+│  └─ extrinsic_summary.json
 └─ srs/
    ├─ doc_manifest.py
    ├─ extract_schemas.py
@@ -732,51 +896,77 @@ RegRAG-Xref/
    ├─ concordance_ir.py
    ├─ run_rag.py
    ├─ eval_rag.py
-   └─ concordance_rag.py
+   ├─ concordance_rag.py
+   ├─ analyze_intrinsic.py
+   ├─ eval_dataset_intrinsic.py
+   └─ build_final_dataset.py` 
 
-```
+----------
 
-## 7. Quick Repro Recipe
+## 9. Quick Repro Recipe
 
-Very short version:
+Super-short end-to-end:
 
-1.  Build schemas (SCHEMA) & generate QAs (DPEL + SCHEMA)
+1.  **Schemas & QAs**
     
-2.  Run LLM-as-a-judge and produce curated `kept` / `eliminated` sets
-    
-3.  Build full passages + queries/qrels
-    
-4.  Run 5 IR systems over full corpus
-    
-5.  Evaluate & compute IR concordance per slice
-    
-6.  Run RAG (`run_rag.py`) for:
-    
-    -   DPEL vs SCHEMA
+    -   `extract_schemas.py` (SCHEMA)
         
-    -   `kept` vs `eliminated`
+    -   `generate_qas_method_DPEL.py` & `generate_qas_method_schema.py`
         
-    -   5 retrievers + `oracle`
-        
-7.  Evaluate RAG (`eval_rag.py`) and aggregate with `concordance_rag.py`.
+2.  **LLM-as-a-judge curation**
     
-
-## 8. Status & Future Work
-
-✅ Dual-passage QAs from cross-references (DPEL + SCHEMA) ✅ LLM-based curation (ensemble judge) ✅ Full-corpus IR evaluation (5 methods) ✅ IR-based concordance analysis ✅ RAG experiments (oracle + 5 retrievers) ✅ RAG evaluation + RAG-based concordance
-
-Planned:
-
--   Final `Gold-DPEL` / `Gold-SCHEMA` definitions combining:
-    
-    -   judge scores,
+    -   `judge_qas_ensemble.py` → curated `{kept,eliminated}` for DPEL & SCHEMA
         
-    -   IR concordance,
-        
-    -   RAG concordance.
-        
--   Deeper intrinsic analysis (by item type, persona, reference type).
+3.  **Full passages + IR prep**
     
--   Extrinsic experiments on downstream regulatory assistants.
+    -   `build_full_passages.py` → `data/passages_full.jsonl`
+        
+    -   `build_ir_inputs.py` + `build_method_qrels.py`
+        
+4.  **Run 5 IR systems**
     
--   Write-up / paper.
+    -   BM25, e5, BGE, BM25→e5 rerank, Hybrid RRF over full corpus
+        
+5.  **IR evaluation & concordance**
+    
+    -   `eval_ir.py` + `concordance_ir.py`
+        
+6.  **Run RAG**
+    
+    -   `run_rag.py` for DPEL vs SCHEMA, kept vs eliminated, 5 retrievers + oracle
+        
+7.  **RAG evaluation & concordance**
+    
+    -   `eval_rag.py` + `concordance_rag.py`
+        
+8.  **Final datasets**
+    
+    -   `build_final_dataset.py` → IR + QA datasets with train/dev/test splits
+        
+9.  **Dataset evaluation**
+    
+    -   `analyze_intrinsic.py` + `eval_dataset_intrinsic.py`
+        
+    -   `eval_dataset_extrinsic.py` (full downstream IR+RAG on final splits)
+        
+
+----------
+
+## 10. Status & Future Work
+
+✅ Dual-passage QAs from cross-references (DPEL + SCHEMA)  
+✅ LLM-based curation (ensemble judge)  
+✅ Full-corpus IR evaluation (5 methods)  
+✅ IR-based concordance analysis  
+✅ RAG experiments (oracle + 5 retrievers)  
+✅ RAG evaluation + RAG-based concordance  
+✅ Final IR and QA datasets with train/dev/test splits  
+✅ Intrinsic + extrinsic dataset evaluation
+
+**Planned / open directions:**
+
+-   Deeper intrinsic analysis (by item type, persona, reference type, cross-document vs intra-document).
+    
+-   Extrinsic experiments on downstream regulatory assistant systems.
+    
+-   Full write-up / paper describing RegRAG-Xref, final dataset release, and baselines.
